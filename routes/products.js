@@ -2,7 +2,7 @@ const express = require('express');
 const adminAuth = require('../middleware/adminAuth');
 const SubCategory = require('../models/SubCategory');
 const Product = require('../models/Product');
-const { parseBool, filePathFromPublicUrl, tryDeleteFile, uploadFor } = require('../utils/uploads');
+const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
 
 const router = express.Router();
 
@@ -39,7 +39,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/products (admin) multipart/form-data: subCategoryId, title, description?, active?, image?
-router.post('/', adminAuth, uploadFor('products').single('image'), async (req, res) => {
+router.post('/', adminAuth, uploadSingleFor('products'), async (req, res) => {
   try {
     const { subCategoryId, title, description } = req.body || {};
     if (!subCategoryId) return res.status(400).json({ message: 'subCategoryId is required' });
@@ -49,7 +49,7 @@ router.post('/', adminAuth, uploadFor('products').single('image'), async (req, r
     if (!sub) return res.status(404).json({ message: 'SubCategory not found' });
 
     const active = parseBool(req.body?.active, true);
-    const imageUrl = req.file ? `/uploads/products/${req.file.filename}` : '';
+    const imageUrl = uploadedFileUrl(req.file);
 
     const item = await Product.create({
       subCategory: subCategoryId,
@@ -66,7 +66,7 @@ router.post('/', adminAuth, uploadFor('products').single('image'), async (req, r
 });
 
 // PUT /api/products/:id (admin) multipart/form-data: subCategoryId?, title?, description?, active?, image?
-router.put('/:id', adminAuth, uploadFor('products').single('image'), async (req, res) => {
+router.put('/:id', adminAuth, uploadSingleFor('products'), async (req, res) => {
   try {
     const item = await Product.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'Product not found' });
@@ -84,7 +84,7 @@ router.put('/:id', adminAuth, uploadFor('products').single('image'), async (req,
 
     if (req.file) {
       const oldPath = filePathFromPublicUrl(item.imageUrl);
-      item.imageUrl = `/uploads/products/${req.file.filename}`;
+      item.imageUrl = uploadedFileUrl(req.file);
       tryDeleteFile(oldPath);
     }
 

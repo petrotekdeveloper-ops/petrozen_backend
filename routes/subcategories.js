@@ -3,7 +3,7 @@ const adminAuth = require('../middleware/adminAuth');
 const Category = require('../models/Category');
 const SubCategory = require('../models/SubCategory');
 const Product = require('../models/Product');
-const { parseBool, filePathFromPublicUrl, tryDeleteFile, uploadFor } = require('../utils/uploads');
+const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
 
 const router = express.Router();
 
@@ -33,7 +33,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/subcategories (admin) multipart/form-data: categoryId, title, description?, active?, image?
-router.post('/', adminAuth, uploadFor('subcategories').single('image'), async (req, res) => {
+router.post('/', adminAuth, uploadSingleFor('subcategories'), async (req, res) => {
   try {
     const { categoryId, title, description } = req.body || {};
     if (!categoryId) return res.status(400).json({ message: 'categoryId is required' });
@@ -43,7 +43,7 @@ router.post('/', adminAuth, uploadFor('subcategories').single('image'), async (r
     if (!cat) return res.status(404).json({ message: 'Category not found' });
 
     const active = parseBool(req.body?.active, true);
-    const imageUrl = req.file ? `/uploads/subcategories/${req.file.filename}` : '';
+    const imageUrl = uploadedFileUrl(req.file);
 
     const item = await SubCategory.create({
       category: categoryId,
@@ -60,7 +60,7 @@ router.post('/', adminAuth, uploadFor('subcategories').single('image'), async (r
 });
 
 // PUT /api/subcategories/:id (admin) multipart/form-data: categoryId?, title?, description?, active?, image?
-router.put('/:id', adminAuth, uploadFor('subcategories').single('image'), async (req, res) => {
+router.put('/:id', adminAuth, uploadSingleFor('subcategories'), async (req, res) => {
   try {
     const item = await SubCategory.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'SubCategory not found' });
@@ -78,7 +78,7 @@ router.put('/:id', adminAuth, uploadFor('subcategories').single('image'), async 
 
     if (req.file) {
       const oldPath = filePathFromPublicUrl(item.imageUrl);
-      item.imageUrl = `/uploads/subcategories/${req.file.filename}`;
+      item.imageUrl = uploadedFileUrl(req.file);
       tryDeleteFile(oldPath);
     }
 

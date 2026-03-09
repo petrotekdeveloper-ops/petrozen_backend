@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const path = require('path');
 const app = express();
 
 require('dotenv').config();
@@ -14,9 +13,6 @@ dns.setDefaultResultOrder('ipv4first');
 
 const adminRoutes = require('./routes/admin');
 app.use('/api/admin', adminRoutes);
-
-// Serve locally uploaded images
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Product hierarchy routes
 const categoryRoutes = require('./routes/categories');

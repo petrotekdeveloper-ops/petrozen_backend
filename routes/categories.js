@@ -3,7 +3,7 @@ const adminAuth = require('../middleware/adminAuth');
 const Category = require('../models/Category');
 const SubCategory = require('../models/SubCategory');
 const Product = require('../models/Product');
-const { parseBool, filePathFromPublicUrl, tryDeleteFile, uploadFor } = require('../utils/uploads');
+const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
 
 const router = express.Router();
 
@@ -32,13 +32,13 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/categories (admin) multipart/form-data: title, description?, active?, image?
-router.post('/', adminAuth, uploadFor('categories').single('image'), async (req, res) => {
+router.post('/', adminAuth, uploadSingleFor('categories'), async (req, res) => {
   try {
     const { title, description } = req.body || {};
     if (!title) return res.status(400).json({ message: 'title is required' });
 
     const active = parseBool(req.body?.active, true);
-    const imageUrl = req.file ? `/uploads/categories/${req.file.filename}` : '';
+    const imageUrl = uploadedFileUrl(req.file);
 
     const item = await Category.create({
       title,
@@ -54,7 +54,7 @@ router.post('/', adminAuth, uploadFor('categories').single('image'), async (req,
 });
 
 // PUT /api/categories/:id (admin) multipart/form-data: title?, description?, active?, image?
-router.put('/:id', adminAuth, uploadFor('categories').single('image'), async (req, res) => {
+router.put('/:id', adminAuth, uploadSingleFor('categories'), async (req, res) => {
   try {
     const item = await Category.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'Category not found' });
@@ -66,7 +66,7 @@ router.put('/:id', adminAuth, uploadFor('categories').single('image'), async (re
 
     if (req.file) {
       const oldPath = filePathFromPublicUrl(item.imageUrl);
-      item.imageUrl = `/uploads/categories/${req.file.filename}`;
+      item.imageUrl = uploadedFileUrl(req.file);
       tryDeleteFile(oldPath);
     }
 

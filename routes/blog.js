@@ -1,7 +1,7 @@
 const express = require('express');
 const adminAuth = require('../middleware/adminAuth');
 const Blog = require('../models/blog');
-const { filePathFromPublicUrl, tryDeleteFile, uploadFor } = require('../utils/uploads');
+const { filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
 
 const router = express.Router();
 
@@ -27,14 +27,14 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/blog (admin) – multipart/form-data: title, description, image
-router.post('/', adminAuth, uploadFor('blog').single('image'), async (req, res) => {
+router.post('/', adminAuth, uploadSingleFor('blog'), async (req, res) => {
   try {
     const { title, description } = req.body || {};
     if (!title) return res.status(400).json({ message: 'title is required' });
     if (!description) return res.status(400).json({ message: 'description is required' });
     if (!req.file) return res.status(400).json({ message: 'image is required' });
 
-    const imageUrl = `/uploads/blog/${req.file.filename}`;
+    const imageUrl = uploadedFileUrl(req.file);
 
     const item = await Blog.create({
       title,
@@ -49,7 +49,7 @@ router.post('/', adminAuth, uploadFor('blog').single('image'), async (req, res) 
 });
 
 // PUT /api/blog/:id (admin) – multipart/form-data: title?, description?, image?
-router.put('/:id', adminAuth, uploadFor('blog').single('image'), async (req, res) => {
+router.put('/:id', adminAuth, uploadSingleFor('blog'), async (req, res) => {
   try {
     const item = await Blog.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'Blog not found' });
@@ -60,7 +60,7 @@ router.put('/:id', adminAuth, uploadFor('blog').single('image'), async (req, res
 
     if (req.file) {
       const oldPath = filePathFromPublicUrl(item.image);
-      item.image = `/uploads/blog/${req.file.filename}`;
+      item.image = uploadedFileUrl(req.file);
       tryDeleteFile(oldPath);
     }
 

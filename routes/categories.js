@@ -3,6 +3,7 @@ const adminAuth = require('../middleware/adminAuth');
 const Category = require('../models/Category');
 const SubCategory = require('../models/SubCategory');
 const Product = require('../models/Product');
+const SeoMeta = require('../models/SeoMeta');
 const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
 
 const router = express.Router();
@@ -87,6 +88,11 @@ router.delete('/:id', adminAuth, async (req, res) => {
     const subCatIds = subCats.map((s) => s._id);
 
     const products = await Product.find({ subCategory: { $in: subCatIds } }, { imageUrl: 1 });
+
+    // Delete SEO for category, subcategories, products
+    await SeoMeta.deleteMany({ pageType: 'category', pageKey: String(category._id) });
+    await SeoMeta.deleteMany({ pageType: 'subcategory', pageKey: { $in: subCatIds.map(String) } });
+    await SeoMeta.deleteMany({ pageType: 'product', pageKey: { $in: products.map((p) => String(p._id)) } });
 
     // Delete DB records
     await Product.deleteMany({ subCategory: { $in: subCatIds } });

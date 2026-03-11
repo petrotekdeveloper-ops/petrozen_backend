@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 
-const SUBDIRS = ['categories', 'subcategories', 'products', 'blog'];
+const SUBDIRS = ['categories', 'subcategories', 'products', 'blog', 'brands'];
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
 
 function safeExt(originalname) {

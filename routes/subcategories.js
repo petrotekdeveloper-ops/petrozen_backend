@@ -98,8 +98,20 @@ router.delete('/:id', adminAuth, async (req, res) => {
 
     const products = await Product.find({ subCategory: sub._id }, { _id: 1, imageUrl: 1 });
 
-    await SeoMeta.deleteMany({ pageType: 'subcategory', pageKey: String(sub._id) });
-    await SeoMeta.deleteMany({ pageType: 'product', pageKey: { $in: products.map((p) => String(p._id)) } });
+    const productIds = products.map((p) => p._id);
+    const productIdStrings = productIds.map(String);
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'subcategory', targetId: sub._id },
+        { pageType: 'subcategory', pageKey: String(sub._id) }
+      ]
+    });
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'product', targetId: { $in: productIds } },
+        { pageType: 'product', pageKey: { $in: productIdStrings } }
+      ]
+    });
 
     await Product.deleteMany({ subCategory: sub._id });
     await SubCategory.deleteOne({ _id: sub._id });

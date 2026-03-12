@@ -89,10 +89,28 @@ router.delete('/:id', adminAuth, async (req, res) => {
 
     const products = await Product.find({ subCategory: { $in: subCatIds } }, { imageUrl: 1 });
 
-    // Delete SEO for category, subcategories, products
-    await SeoMeta.deleteMany({ pageType: 'category', pageKey: String(category._id) });
-    await SeoMeta.deleteMany({ pageType: 'subcategory', pageKey: { $in: subCatIds.map(String) } });
-    await SeoMeta.deleteMany({ pageType: 'product', pageKey: { $in: products.map((p) => String(p._id)) } });
+    // Delete SEO for category, subcategories, products (new + legacy fields)
+    const subCatIdStrings = subCatIds.map(String);
+    const productIds = products.map((p) => p._id);
+    const productIdStrings = productIds.map(String);
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'category', targetId: category._id },
+        { pageType: 'category', pageKey: String(category._id) }
+      ]
+    });
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'subcategory', targetId: { $in: subCatIds } },
+        { pageType: 'subcategory', pageKey: { $in: subCatIdStrings } }
+      ]
+    });
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'product', targetId: { $in: productIds } },
+        { pageType: 'product', pageKey: { $in: productIdStrings } }
+      ]
+    });
 
     // Delete DB records
     await Product.deleteMany({ subCategory: { $in: subCatIds } });

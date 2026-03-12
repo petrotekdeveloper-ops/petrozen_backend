@@ -13,11 +13,9 @@ dns.setDefaultResultOrder('ipv4first');
 
 const adminRoutes = require('./routes/admin');
 const adminSeoRoutes = require('./routes/adminSeo');
-const adminEnquiriesRoutes = require('./routes/adminEnquiries');
 
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/seo', adminSeoRoutes);
-app.use('/api/admin/enquiries', adminEnquiriesRoutes);
 
 // Product hierarchy routes
 const categoryRoutes = require('./routes/categories');
@@ -29,6 +27,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/subcategories', subCategoryRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/blog', blogRoutes);
+app.use('/api/brands', require('./routes/brands'));
 
 // SEO (public)
 const seoRoutes = require('./routes/seo');

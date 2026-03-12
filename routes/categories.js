@@ -3,6 +3,7 @@ const adminAuth = require('../middleware/adminAuth');
 const Category = require('../models/Category');
 const SubCategory = require('../models/SubCategory');
 const Product = require('../models/Product');
+const SeoMeta = require('../models/SeoMeta');
 const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
 
 const router = express.Router();
@@ -87,6 +88,29 @@ router.delete('/:id', adminAuth, async (req, res) => {
     const subCatIds = subCats.map((s) => s._id);
 
     const products = await Product.find({ subCategory: { $in: subCatIds } }, { imageUrl: 1 });
+
+    // Delete SEO for category, subcategories, products (new + legacy fields)
+    const subCatIdStrings = subCatIds.map(String);
+    const productIds = products.map((p) => p._id);
+    const productIdStrings = productIds.map(String);
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'category', targetId: category._id },
+        { pageType: 'category', pageKey: String(category._id) }
+      ]
+    });
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'subcategory', targetId: { $in: subCatIds } },
+        { pageType: 'subcategory', pageKey: { $in: subCatIdStrings } }
+      ]
+    });
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'product', targetId: { $in: productIds } },
+        { pageType: 'product', pageKey: { $in: productIdStrings } }
+      ]
+    });
 
     // Delete DB records
     await Product.deleteMany({ subCategory: { $in: subCatIds } });

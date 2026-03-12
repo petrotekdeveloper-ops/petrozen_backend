@@ -3,6 +3,7 @@ const adminAuth = require('../middleware/adminAuth');
 const Category = require('../models/Category');
 const SubCategory = require('../models/SubCategory');
 const Product = require('../models/Product');
+const SeoMeta = require('../models/SeoMeta');
 const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
 
 const router = express.Router();
@@ -95,7 +96,22 @@ router.delete('/:id', adminAuth, async (req, res) => {
     const sub = await SubCategory.findById(req.params.id);
     if (!sub) return res.status(404).json({ message: 'SubCategory not found' });
 
-    const products = await Product.find({ subCategory: sub._id }, { imageUrl: 1 });
+    const products = await Product.find({ subCategory: sub._id }, { _id: 1, imageUrl: 1 });
+
+    const productIds = products.map((p) => p._id);
+    const productIdStrings = productIds.map(String);
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'subcategory', targetId: sub._id },
+        { pageType: 'subcategory', pageKey: String(sub._id) }
+      ]
+    });
+    await SeoMeta.deleteMany({
+      $or: [
+        { targetType: 'product', targetId: { $in: productIds } },
+        { pageType: 'product', pageKey: { $in: productIdStrings } }
+      ]
+    });
 
     await Product.deleteMany({ subCategory: sub._id });
     await SubCategory.deleteOne({ _id: sub._id });

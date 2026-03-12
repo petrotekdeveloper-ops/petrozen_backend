@@ -3,14 +3,16 @@ const crypto = require('crypto');
 const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 
-const SUBDIRS = ['categories', 'subcategories', 'products', 'blog'];
+const SUBDIRS = ['categories', 'subcategories', 'products', 'blog', 'brands'];
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+const PDF_EXTENSIONS = ['.pdf'];
+const ALLOWED_EXTENSIONS = [...IMAGE_EXTENSIONS, ...PDF_EXTENSIONS];
 
 function safeExt(originalname) {
   const name = String(originalname || '');
   const dotIndex = name.lastIndexOf('.');
   const ext = dotIndex >= 0 ? name.slice(dotIndex).toLowerCase() : '';
-  if (IMAGE_EXTENSIONS.includes(ext)) return ext;
+  if (ALLOWED_EXTENSIONS.includes(ext)) return ext;
   return '';
 }
 
@@ -192,6 +194,89 @@ function uploadSingleFor(subdir, fieldName = 'image') {
   };
 }
 
+function uploadFieldsFor(subdir, fieldRules = []) {
+  const rulesByField = new Map(
+    (Array.isArray(fieldRules) ? fieldRules : []).map((rule) => [
+      String(rule && rule.name ? rule.name : ''),
+      {
+        allowImages: rule.allowImages !== false,
+        allowPdf: Boolean(rule.allowPdf)
+      }
+    ]).filter(([name]) => Boolean(name))
+  );
+
+  const middleware = multer({
+    storage: new SpacesStorageEngine(subdir),
+    fileFilter: (req, file, cb) => {
+      const rule = rulesByField.get(file.fieldname);
+      if (!rule) {
+        cb(new Error(`Unexpected upload field: ${file.fieldname}`));
+        return;
+      }
+
+      const mimetype = String(file.mimetype || '').toLowerCase();
+      const ext = safeExt(file.originalname);
+      const isImage = mimetype.startsWith('image/') && IMAGE_EXTENSIONS.includes(ext);
+      const isPdf = mimetype === 'application/pdf' && PDF_EXTENSIONS.includes(ext);
+
+      if ((rule.allowImages && isImage) || (rule.allowPdf && isPdf)) {
+        cb(null, true);
+        return;
+      }
+
+      cb(new Error(`Invalid file type for ${file.fieldname}. Allowed types: ${rule.allowPdf ? 'images or PDF' : 'images only'}`));
+    },
+    limits: { fileSize: 5 * 1024 * 1024 }
+  }).fields(fieldRules.map(({ name, maxCount = 1 }) => ({ name, maxCount })));
+
+  return (req, res, next) => {
+    middleware(req, res, (err) => {
+      if (!err) {
+        next();
+        return;
+      }
+
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          res.status(400).json({ message: 'File too large. Maximum size is 5MB.' });
+          return;
+        }
+        res.status(400).json({ message: `Upload error: ${err.message}` });
+        return;
+      }
+
+      const providerErrorNames = new Set([
+        'InvalidAccessKeyId',
+        'SignatureDoesNotMatch',
+        'AccessDenied',
+        'NoSuchBucket',
+        'CredentialsProviderError'
+      ]);
+
+      const isProviderError = Boolean(
+        (err && err.$metadata) ||
+        (err && err.Code) ||
+        (err && providerErrorNames.has(err.name)) ||
+        (err && typeof err.message === 'string' && /(access key|signature|bucket|credentials|digitalocean|spaces)/i.test(err.message))
+      );
+
+      if (isProviderError) {
+        console.error('Spaces upload error:', err);
+        res.status(500).json({ message: 'Storage upload failed. Check DigitalOcean Spaces credentials and bucket settings.' });
+        return;
+      }
+
+      if (err && typeof err.message === 'string') {
+        const isConfigIssue = err.message.startsWith('Missing required DigitalOcean Spaces env vars');
+        res.status(isConfigIssue ? 500 : 400).json({ message: err.message });
+        return;
+      }
+
+      res.status(500).json({ message: 'Failed to upload file' });
+    });
+  };
+}
+
 function uploadedFileUrl(file) {
   if (!file) return '';
   return file.cdnUrl || file.location || '';
@@ -250,5 +335,6 @@ module.exports = {
   upload,
   uploadFor,
   uploadSingleFor,
+  uploadFieldsFor,
   SUBDIRS
 };

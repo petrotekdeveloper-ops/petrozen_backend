@@ -2,15 +2,29 @@ const mongoose = require('mongoose');
 
 const SeoMetaSchema = new mongoose.Schema(
   {
+    // Legacy fields kept for backward compatibility
     pageType: {
       type: String,
-      required: true,
       enum: ['static', 'category', 'subcategory', 'product'],
       index: true
     },
     pageKey: {
       type: String,
-      required: true,
+      trim: true,
+      index: true
+    },
+    // Canonical identity fields
+    targetType: {
+      type: String,
+      enum: ['static', 'category', 'subcategory', 'product'],
+      index: true
+    },
+    targetId: {
+      type: mongoose.Schema.Types.ObjectId,
+      index: true
+    },
+    staticKey: {
+      type: String,
       trim: true,
       index: true
     },
@@ -21,6 +35,14 @@ const SeoMetaSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-SeoMetaSchema.index({ pageType: 1, pageKey: 1 }, { unique: true });
+SeoMetaSchema.index(
+  { targetType: 1, targetId: 1 },
+  { unique: true, sparse: true, partialFilterExpression: { targetType: { $in: ['category', 'subcategory', 'product'] } } }
+);
+SeoMetaSchema.index(
+  { targetType: 1, staticKey: 1 },
+  { unique: true, sparse: true, partialFilterExpression: { targetType: 'static' } }
+);
+SeoMetaSchema.index({ pageType: 1, pageKey: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('SeoMeta', SeoMetaSchema);

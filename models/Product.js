@@ -19,6 +19,7 @@ const ProductSchema = new mongoose.Schema(
     imageUrl: { type: String, default: '' },
     features: { type: [String], default: [], trim: true },
     specifications: { type: [String], default: [], trim: true },
+    grades: { type: [String], default: [], trim: true },
     catelog: { type: String, default: ''},
     active: { type: Boolean, default: true, index: true }
   },

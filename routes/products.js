@@ -102,6 +102,7 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
     const catelog = uploadedFileUrl(firstUploadedFile(req, 'catelog') || firstUploadedFile(req, 'catelouge'));
     const features = parseStringArray(req.body?.features) || [];
     const specifications = parseStringArray(req.body?.specifications) || [];
+    const grades = parseStringArray(req.body?.grades) || [];
 
     const item = await Product.create({
       subCategory: subCategoryId,
@@ -112,7 +113,8 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
       imageUrl,
       catelog,
       features,
-      specifications
+      specifications,
+      grades
     });
 
     return res.status(201).json({ item });
@@ -148,6 +150,7 @@ router.put('/:id', adminAuth, productUpload, async (req, res) => {
     if (req.body?.active !== undefined) item.active = parseBool(req.body.active, item.active);
     if (req.body?.features !== undefined) item.features = parseStringArray(req.body.features) || [];
     if (req.body?.specifications !== undefined) item.specifications = parseStringArray(req.body.specifications) || [];
+    if (req.body?.grades !== undefined) item.grades = parseStringArray(req.body.grades) || [];
 
     const imageFile = firstUploadedFile(req, 'image');
     if (imageFile) {

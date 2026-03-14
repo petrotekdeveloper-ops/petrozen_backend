@@ -1,5 +1,6 @@
 const multer = require('multer');
 const crypto = require('crypto');
+const sharp = require('sharp');
 const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 
@@ -7,6 +8,14 @@ const SUBDIRS = ['categories', 'subcategories', 'products', 'blog', 'brands'];
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
 const PDF_EXTENSIONS = ['.pdf'];
 const ALLOWED_EXTENSIONS = [...IMAGE_EXTENSIONS, ...PDF_EXTENSIONS];
+
+// WebP conversion settings
+const WEBP_QUALITY = 80;
+const WEBP_MAX_WIDTH = 1600;
+
+// Image MIME types that will be converted to WebP (jpg, jpeg, png)
+const CONVERTIBLE_IMAGE_MIMETYPES = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+const CONVERTIBLE_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
 
 function safeExt(originalname) {
   const name = String(originalname || '');
@@ -59,8 +68,8 @@ function ensureSpacesReady() {
   }
 }
 
-function buildObjectKey(subdir, originalname) {
-  const ext = safeExt(originalname);
+function buildObjectKey(subdir, originalname, outputExt) {
+  const ext = outputExt || safeExt(originalname);
   const uniqueId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
   const moduleDir = trimSurroundingSlashes(subdir);
   const fileName = `${Date.now()}-${uniqueId}${ext}`;
@@ -70,49 +79,88 @@ function buildObjectKey(subdir, originalname) {
   return `${moduleDir}/${fileName}`;
 }
 
+async function streamToBuffer(stream) {
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function convertToWebP(buffer) {
+  return sharp(buffer)
+    .resize(WEBP_MAX_WIDTH, null, { withoutEnlargement: true })
+    .webp({ quality: WEBP_QUALITY })
+    .toBuffer();
+}
+
+function shouldConvertToWebP(mimetype, originalname) {
+  const ext = safeExt(originalname);
+  return (
+    CONVERTIBLE_IMAGE_MIMETYPES.has(String(mimetype || '').toLowerCase()) &&
+    CONVERTIBLE_IMAGE_EXTENSIONS.has(ext)
+  );
+}
+
 function buildPublicUrl(objectKey) {
   return `${cdnBaseUrl}/${objectKey}`;
 }
 
 class SpacesStorageEngine {
-  constructor(subdir) {
+  constructor(subdir, options = {}) {
     this.subdir = subdir;
+    this.convertImagesToWebP = options.convertImagesToWebP !== false;
   }
 
-  _handleFile(req, file, cb) {
-    let objectKey;
-    try {
-      ensureSpacesReady();
-      objectKey = buildObjectKey(this.subdir, file.originalname);
-    } catch (err) {
-      cb(err);
-      return;
-    }
-
+  async _processAndUpload(file, objectKey, body, contentType) {
     const uploader = new Upload({
       client: spacesClient,
       params: {
         Bucket: spacesBucket,
         Key: objectKey,
-        Body: file.stream,
+        Body: body,
         ACL: 'public-read',
-        ContentType: file.mimetype || 'application/octet-stream'
+        ContentType: contentType
       }
     });
+    await uploader.done();
+    return {
+      key: objectKey,
+      filename: objectKey.split('/').pop(),
+      bucket: spacesBucket,
+      location: buildPublicUrl(objectKey),
+      cdnUrl: buildPublicUrl(objectKey)
+    };
+  }
 
-    uploader.done()
-      .then(() => {
-        cb(null, {
-          key: objectKey,
-          filename: objectKey.split('/').pop(),
-          bucket: spacesBucket,
-          location: buildPublicUrl(objectKey),
-          cdnUrl: buildPublicUrl(objectKey)
-        });
-      })
-      .catch((err) => {
+  _handleFile(req, file, cb) {
+    (async () => {
+      try {
+        ensureSpacesReady();
+        const buffer = await streamToBuffer(file.stream);
+        const mimetype = String(file.mimetype || '').toLowerCase();
+        const willConvert = this.convertImagesToWebP && shouldConvertToWebP(mimetype, file.originalname);
+
+        let body;
+        let objectKey;
+        let contentType;
+
+        if (willConvert) {
+          body = await convertToWebP(buffer);
+          objectKey = buildObjectKey(this.subdir, file.originalname, '.webp');
+          contentType = 'image/webp';
+        } else {
+          body = buffer;
+          objectKey = buildObjectKey(this.subdir, file.originalname);
+          contentType = mimetype || 'application/octet-stream';
+        }
+
+        const result = await this._processAndUpload(file, objectKey, body, contentType);
+        cb(null, result);
+      } catch (err) {
         cb(err);
-      });
+      }
+    })();
   }
 
   _removeFile(req, file, cb) {
@@ -130,15 +178,23 @@ class SpacesStorageEngine {
   }
 }
 
+function isAllowedImageMimetype(mimetype) {
+  return CONVERTIBLE_IMAGE_MIMETYPES.has(String(mimetype || '').toLowerCase());
+}
+
 function uploadFor(subdir) {
   return multer({
     storage: new SpacesStorageEngine(subdir),
     fileFilter: (req, file, cb) => {
-      if (file && typeof file.mimetype === 'string' && file.mimetype.startsWith('image/')) {
+      if (!file || typeof file.mimetype !== 'string') {
+        cb(new Error('Invalid file'));
+        return;
+      }
+      if (isAllowedImageMimetype(file.mimetype) && CONVERTIBLE_IMAGE_EXTENSIONS.has(safeExt(file.originalname))) {
         cb(null, true);
         return;
       }
-      cb(new Error('Only image uploads are allowed'));
+      cb(new Error('Only JPEG and PNG images are allowed'));
     },
     limits: { fileSize: 5 * 1024 * 1024 }
   });
@@ -216,15 +272,15 @@ function uploadFieldsFor(subdir, fieldRules = []) {
 
       const mimetype = String(file.mimetype || '').toLowerCase();
       const ext = safeExt(file.originalname);
-      const isImage = mimetype.startsWith('image/') && IMAGE_EXTENSIONS.includes(ext);
+      const isConvertibleImage = isAllowedImageMimetype(mimetype) && CONVERTIBLE_IMAGE_EXTENSIONS.has(ext);
       const isPdf = mimetype === 'application/pdf' && PDF_EXTENSIONS.includes(ext);
 
-      if ((rule.allowImages && isImage) || (rule.allowPdf && isPdf)) {
+      if ((rule.allowImages && isConvertibleImage) || (rule.allowPdf && isPdf)) {
         cb(null, true);
         return;
       }
 
-      cb(new Error(`Invalid file type for ${file.fieldname}. Allowed types: ${rule.allowPdf ? 'images or PDF' : 'images only'}`));
+      cb(new Error(`Invalid file type for ${file.fieldname}. Allowed: ${rule.allowPdf ? 'JPEG, PNG or PDF' : 'JPEG, PNG images only'}`));
     },
     limits: { fileSize: 5 * 1024 * 1024 }
   }).fields(fieldRules.map(({ name, maxCount = 1 }) => ({ name, maxCount })));

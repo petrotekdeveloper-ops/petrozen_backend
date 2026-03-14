@@ -21,6 +21,7 @@ const ProductSchema = new mongoose.Schema(
     specifications: { type: [String], default: [], trim: true },
     grades: { type: [String], default: [], trim: true },
     catelog: { type: String, default: ''},
+    sort: {type:String, default:''},
     active: { type: Boolean, default: true, index: true }
   },
   { timestamps: true }

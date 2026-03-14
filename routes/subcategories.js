@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
     if (req.query.categoryId) filter.category = req.query.categoryId;
     if (req.query.active !== undefined) filter.active = parseBool(req.query.active, true);
 
-    const items = await SubCategory.find(filter).sort({ createdAt: -1 }).populate('category', 'title active');
+    const items = await SubCategory.find(filter).sort({ sort: 1, createdAt: 1 }).populate('category', 'title active');
     return res.json({ items });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to list subcategories' });
@@ -36,7 +36,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/subcategories (admin) multipart/form-data: categoryId, title, description?, active?, image?
 router.post('/', adminAuth, uploadSingleFor('subcategories'), async (req, res) => {
   try {
-    const { categoryId, title, description } = req.body || {};
+    const { categoryId, title, description, sort } = req.body || {};
     if (!categoryId) return res.status(400).json({ message: 'categoryId is required' });
     if (!title) return res.status(400).json({ message: 'title is required' });
 
@@ -51,7 +51,8 @@ router.post('/', adminAuth, uploadSingleFor('subcategories'), async (req, res) =
       title,
       description: description || '',
       active,
-      imageUrl
+      imageUrl,
+      sort: sort !== undefined ? String(sort).trim() : ''
     });
 
     return res.status(201).json({ item });
@@ -66,7 +67,7 @@ router.put('/:id', adminAuth, uploadSingleFor('subcategories'), async (req, res)
     const item = await SubCategory.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'SubCategory not found' });
 
-    const { categoryId, title, description } = req.body || {};
+    const { categoryId, title, description, sort } = req.body || {};
 
     if (categoryId !== undefined) {
       const cat = await Category.findById(categoryId);
@@ -75,6 +76,7 @@ router.put('/:id', adminAuth, uploadSingleFor('subcategories'), async (req, res)
     }
     if (title !== undefined) item.title = title;
     if (description !== undefined) item.description = description;
+    if (sort !== undefined) item.sort = String(sort).trim();
     if (req.body?.active !== undefined) item.active = parseBool(req.body.active, item.active);
 
     if (req.file) {

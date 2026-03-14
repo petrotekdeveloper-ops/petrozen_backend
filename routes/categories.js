@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
     const filter = {};
     if (req.query.active !== undefined) filter.active = parseBool(req.query.active, true);
 
-    const categories = await Category.find(filter).sort({ createdAt: -1 });
+    const categories = await Category.find(filter).sort({ sort: 1, createdAt: 1 });
     return res.json({ items: categories });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to list categories' });
@@ -35,7 +35,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/categories (admin) multipart/form-data: title, description?, active?, image?
 router.post('/', adminAuth, uploadSingleFor('categories'), async (req, res) => {
   try {
-    const { title, description } = req.body || {};
+    const { title, description, sort } = req.body || {};
     if (!title) return res.status(400).json({ message: 'title is required' });
 
     const active = parseBool(req.body?.active, true);
@@ -45,7 +45,8 @@ router.post('/', adminAuth, uploadSingleFor('categories'), async (req, res) => {
       title,
       description: description || '',
       active,
-      imageUrl
+      imageUrl,
+      sort: sort !== undefined ? String(sort).trim() : ''
     });
 
     return res.status(201).json({ item });
@@ -60,9 +61,10 @@ router.put('/:id', adminAuth, uploadSingleFor('categories'), async (req, res) =>
     const item = await Category.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'Category not found' });
 
-    const { title, description } = req.body || {};
+    const { title, description, sort } = req.body || {};
     if (title !== undefined) item.title = title;
     if (description !== undefined) item.description = description;
+    if (sort !== undefined) item.sort = String(sort).trim();
     if (req.body?.active !== undefined) item.active = parseBool(req.body.active, item.active);
 
     if (req.file) {

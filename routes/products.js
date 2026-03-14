@@ -58,7 +58,7 @@ router.get('/', async (req, res) => {
     if (req.query.active !== undefined) filter.active = parseBool(req.query.active, true);
 
     const items = await Product.find(filter)
-      .sort({ createdAt: -1 })
+      .sort({ sort: 1, createdAt: 1 })
       .populate({ path: 'subCategory', select: 'title active', populate: { path: 'category', select: 'title active' } })
       .populate({ path: 'brand', select: 'name image' });
 
@@ -84,7 +84,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/products (admin) multipart/form-data: subCategoryId, brandId?, title, description?, active?, image?
 router.post('/', adminAuth, productUpload, async (req, res) => {
   try {
-    const { subCategoryId, brandId, title, description } = req.body || {};
+    const { subCategoryId, brandId, title, description, sort } = req.body || {};
     if (!subCategoryId) return res.status(400).json({ message: 'subCategoryId is required' });
     if (!title) return res.status(400).json({ message: 'title is required' });
 
@@ -114,7 +114,8 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
       catelog,
       features,
       specifications,
-      grades
+      grades,
+      sort: sort !== undefined ? String(sort).trim() : ''
     });
 
     return res.status(201).json({ item });
@@ -129,7 +130,7 @@ router.put('/:id', adminAuth, productUpload, async (req, res) => {
     const item = await Product.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'Product not found' });
 
-    const { subCategoryId, brandId, title, description } = req.body || {};
+    const { subCategoryId, brandId, title, description, sort } = req.body || {};
 
     if (subCategoryId !== undefined) {
       const sub = await SubCategory.findById(subCategoryId);
@@ -147,6 +148,7 @@ router.put('/:id', adminAuth, productUpload, async (req, res) => {
     }
     if (title !== undefined) item.title = title;
     if (description !== undefined) item.description = description;
+    if (sort !== undefined) item.sort = String(sort).trim();
     if (req.body?.active !== undefined) item.active = parseBool(req.body.active, item.active);
     if (req.body?.features !== undefined) item.features = parseStringArray(req.body.features) || [];
     if (req.body?.specifications !== undefined) item.specifications = parseStringArray(req.body.specifications) || [];

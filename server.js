@@ -37,6 +37,10 @@ app.use('/api/seo', seoRoutes);
 const contactRoutes = require('./routes/contact');
 app.use('/api/contact', contactRoutes);
 
+// XML sitemap
+const sitemapRoutes = require('./routes/sitemap');
+app.use('/', sitemapRoutes);
+
 async function connectDB() {
     try {
       await mongoose.connect(process.env.MONGODB_URI);

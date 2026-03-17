@@ -5,6 +5,9 @@ const Product = require('../models/Product');
 const router = express.Router();
 
 function getBaseUrl(req) {
+  // Use SITE_URL env when behind proxy (e.g. Netlify → DigitalOcean) so sitemap has correct canonical URLs
+  const siteUrl = process.env.SITE_URL || process.env.FRONTEND_URL;
+  if (siteUrl) return String(siteUrl).replace(/\/+$/, '');
   const host = req.get('host');
   const protocol = req.protocol || 'http';
   return `${protocol}://${host}`;

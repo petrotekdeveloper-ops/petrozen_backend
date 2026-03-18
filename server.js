@@ -37,6 +37,10 @@ app.use('/api/seo', seoRoutes);
 const contactRoutes = require('./routes/contact');
 app.use('/api/contact', contactRoutes);
 
+// Prerender (bots only, for SEO/meta)
+const prerenderRoutes = require('./routes/prerender');
+app.use('/', prerenderRoutes);
+
 // XML sitemap
 const sitemapRoutes = require('./routes/sitemap');
 app.use('/', sitemapRoutes);

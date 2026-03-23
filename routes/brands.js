@@ -8,7 +8,7 @@ const router = express.Router();
 // GET /api/brands – list all brands (public)
 router.get('/', async (req, res) => {
   try {
-    const brands = await Brand.find().sort({ createdAt: -1 });
+    const brands = await Brand.find().sort({ name: 1 });
     return res.json({ items: brands });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to list brands' });

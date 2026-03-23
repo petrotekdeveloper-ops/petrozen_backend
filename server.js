@@ -1,12 +1,32 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const compression = require('compression');
 const app = express();
 
 require('dotenv').config();
 
 app.use(cors());
+app.disable('x-powered-by');
+app.use(
+  compression({
+    threshold: 1024,
+  }),
+);
 app.use(express.json());
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store');
+    return next();
+  }
+
+  const isImmutableAsset = /\.(?:js|css|mjs|woff2?|ttf|eot|otf|svg|png|jpe?g|webp|avif|gif|ico)$/i.test(req.path);
+  if (isImmutableAsset) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+  next();
+});
 
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');

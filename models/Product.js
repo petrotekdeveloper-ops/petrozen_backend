@@ -22,7 +22,8 @@ const ProductSchema = new mongoose.Schema(
     grades: { type: [String], default: [], trim: true },
     catelog: { type: String, default: ''},
     sort: {type:String, default:''},
-    active: { type: Boolean, default: true, index: true }
+    active: { type: Boolean, default: true, index: true },
+    chatbotActive: { type: Boolean, default: true, index: true }
   },
   { timestamps: true }
 );

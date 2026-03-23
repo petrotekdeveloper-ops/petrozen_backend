@@ -30,7 +30,7 @@ const ChatSessionSchema = new mongoose.Schema(
     },
     enquiryType: {
       type: String,
-      enum: ['product'],
+      enum: ['product', 'service', 'quote'],
       default: 'product'
     },
     name: {
@@ -65,9 +65,27 @@ const ChatSessionSchema = new mongoose.Schema(
       default: '',
       trim: true
     },
+    serviceCategoryId: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    serviceCategoryTitle: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    customAnswers: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
     completedAt: {
       type: Date,
       default: null
+    },
+    enabled: {
+      type: Boolean,
+      default: undefined
     }
   },
   { timestamps: true }

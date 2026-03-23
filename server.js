@@ -37,6 +37,10 @@ app.use('/api/seo', seoRoutes);
 const contactRoutes = require('./routes/contact');
 app.use('/api/contact', contactRoutes);
 
+// Chatbot (phase 1: product enquiry)
+const chatRoutes = require('./routes/chat');
+app.use('/api/chat', chatRoutes);
+
 // XML sitemap
 const sitemapRoutes = require('./routes/sitemap');
 app.use('/', sitemapRoutes);

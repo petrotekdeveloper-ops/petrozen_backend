@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const adminAuth = require('../middleware/adminAuth');
 const ContactEnquiry = require('../models/ContactEnquiry');
+const ChatSession = require('../models/ChatSession');
 
 const router = express.Router();
 
@@ -77,6 +78,48 @@ router.get('/enquiries/:id', adminAuth, async (req, res) => {
     return res.json({ item });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to fetch enquiry' });
+  }
+});
+
+// GET /api/admin/chat-enquiries - list chatbot enquiries (stored as sessions)
+router.get('/chat-enquiries', adminAuth, async (req, res) => {
+  try {
+    const items = await ChatSession.find({ phone: { $exists: true, $ne: '' } })
+      .sort({ createdAt: -1 })
+      .populate('productId', 'title')
+      .lean();
+    return res.json({ items });
+  } catch (err) {
+    return res.status(500).json({ message: 'Failed to fetch chatbot enquiries' });
+  }
+});
+
+// GET /api/admin/chat-enquiries/:id - get one chatbot enquiry (admin only)
+router.get('/chat-enquiries/:id', adminAuth, async (req, res) => {
+  try {
+    const item = await ChatSession.findById(req.params.id)
+      .populate('productId', 'title')
+      .lean();
+    if (!item || !item.phone) return res.status(404).json({ message: 'Chatbot enquiry not found' });
+    return res.json({ item });
+  } catch (err) {
+    return res.status(500).json({ message: 'Failed to fetch chatbot enquiry' });
+  }
+});
+
+// DELETE /api/admin/chat-enquiries/:id - delete one chatbot enquiry (admin only)
+router.delete('/chat-enquiries/:id', adminAuth, async (req, res) => {
+  try {
+    const item = await ChatSession.findById(req.params.id);
+    if (!item || !item.phone) {
+      return res.status(404).json({ message: 'Chatbot enquiry not found' });
+    }
+
+    await ChatSession.deleteOne({ _id: item._id });
+
+    return res.json({ message: 'Chatbot enquiry deleted.' });
+  } catch (err) {
+    return res.status(500).json({ message: 'Failed to delete chatbot enquiry' });
   }
 });
 

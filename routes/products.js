@@ -49,6 +49,13 @@ function parseStringArray(value) {
     .filter(Boolean);
 }
 
+function parseSortNumber(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 // GET /api/products?subCategoryId=...&brandId=...&active=true|false
 router.get('/', async (req, res) => {
   try {
@@ -58,9 +65,23 @@ router.get('/', async (req, res) => {
     if (req.query.active !== undefined) filter.active = parseBool(req.query.active, true);
 
     const items = await Product.find(filter)
-      .sort({ sort: 1, createdAt: 1 })
       .populate({ path: 'subCategory', select: 'title active', populate: { path: 'category', select: 'title active' } })
       .populate({ path: 'brand', select: 'name image' });
+
+    items.sort((a, b) => {
+      const aSort = parseSortNumber(a?.sort);
+      const bSort = parseSortNumber(b?.sort);
+
+      const aHasSort = aSort !== null;
+      const bHasSort = bSort !== null;
+      if (aHasSort && bHasSort && aSort !== bSort) return aSort - bSort;
+      if (aHasSort && !bHasSort) return -1;
+      if (!aHasSort && bHasSort) return 1;
+
+      const aCreatedAt = new Date(a?.createdAt || 0).getTime();
+      const bCreatedAt = new Date(b?.createdAt || 0).getTime();
+      return aCreatedAt - bCreatedAt;
+    });
 
     return res.json({ items });
   } catch (err) {

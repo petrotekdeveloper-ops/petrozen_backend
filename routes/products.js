@@ -7,6 +7,77 @@ const SeoMeta = require('../models/SeoMeta');
 const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadFieldsFor } = require('../utils/uploads');
 
 const router = express.Router();
+
+const DEFAULT_VARIETY_KEYWORD = 'grade';
+
+/** Legacy request body: [{ keyword, grade }, ...] */
+function parseLegacyVarietyRows(value) {
+  if (value === undefined) return [];
+  let arr;
+  if (Array.isArray(value)) {
+    arr = value;
+  } else {
+    const raw = String(value || '').trim();
+    if (!raw) return [];
+    try {
+      arr = JSON.parse(raw);
+    } catch (_) {
+      return [];
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((entry) => ({
+      keyword: String(entry?.keyword ?? DEFAULT_VARIETY_KEYWORD).trim() || DEFAULT_VARIETY_KEYWORD,
+      grade: String(entry?.grade ?? '').trim()
+    }))
+    .filter((entry) => entry.grade);
+}
+
+function effectiveVarietyGroup(plain) {
+  const vals = Array.isArray(plain.varietyValues)
+    ? plain.varietyValues.map((s) => String(s ?? '').trim()).filter(Boolean)
+    : [];
+  if (vals.length > 0) {
+    return {
+      varietyKeyword:
+        String(plain.varietyKeyword ?? DEFAULT_VARIETY_KEYWORD).trim() || DEFAULT_VARIETY_KEYWORD,
+      varietyValues: vals
+    };
+  }
+  const oldRows = Array.isArray(plain.varieties) ? plain.varieties : [];
+  const fromRows = oldRows
+    .map((v) => ({
+      keyword: String(v?.keyword ?? DEFAULT_VARIETY_KEYWORD).trim() || DEFAULT_VARIETY_KEYWORD,
+      grade: String(v?.grade ?? '').trim()
+    }))
+    .filter((v) => v.grade);
+  if (fromRows.length > 0) {
+    return {
+      varietyKeyword: fromRows[0].keyword,
+      varietyValues: fromRows.map((r) => r.grade)
+    };
+  }
+  const legacyGrades = plain.grades;
+  if (Array.isArray(legacyGrades) && legacyGrades.length > 0) {
+    return {
+      varietyKeyword: DEFAULT_VARIETY_KEYWORD,
+      varietyValues: legacyGrades.map((g) => String(g ?? '').trim()).filter(Boolean)
+    };
+  }
+  return { varietyKeyword: DEFAULT_VARIETY_KEYWORD, varietyValues: [] };
+}
+
+function serializeProduct(doc) {
+  if (!doc) return doc;
+  const plain = typeof doc.toObject === 'function' ? doc.toObject() : { ...doc };
+  const v = effectiveVarietyGroup(plain);
+  plain.varietyKeyword = v.varietyKeyword;
+  plain.varietyValues = v.varietyValues;
+  delete plain.varieties;
+  delete plain.grades;
+  return plain;
+}
 const productUpload = uploadFieldsFor('products', [
   { name: 'image', maxCount: 1, allowImages: true, allowPdf: false },
   { name: 'catelog', maxCount: 1, allowImages: true, allowPdf: true },
@@ -83,7 +154,7 @@ router.get('/', async (req, res) => {
       return aCreatedAt - bCreatedAt;
     });
 
-    return res.json({ items });
+    return res.json({ items: items.map((doc) => serializeProduct(doc)) });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to list products' });
   }
@@ -96,7 +167,7 @@ router.get('/:id', async (req, res) => {
       .populate({ path: 'subCategory', select: 'title active', populate: { path: 'category', select: 'title active' } })
       .populate({ path: 'brand', select: 'name image' });
     if (!item) return res.status(404).json({ message: 'Product not found' });
-    return res.json({ item });
+    return res.json({ item: serializeProduct(item) });
   } catch (err) {
     return res.status(400).json({ message: 'Invalid product id' });
   }
@@ -123,7 +194,20 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
     const catelog = uploadedFileUrl(firstUploadedFile(req, 'catelog') || firstUploadedFile(req, 'catelouge'));
     const features = parseStringArray(req.body?.features) || [];
     const specifications = parseStringArray(req.body?.specifications) || [];
-    const grades = parseStringArray(req.body?.grades) || [];
+    const applications = parseStringArray(req.body?.applications) || [];
+
+    let varietyKeyword =
+      String(req.body?.varietyKeyword ?? DEFAULT_VARIETY_KEYWORD).trim() || DEFAULT_VARIETY_KEYWORD;
+    let varietyValues = [];
+    if (req.body?.varietyValues !== undefined) {
+      varietyValues = parseStringArray(req.body.varietyValues) || [];
+    } else if (req.body?.grades !== undefined) {
+      varietyValues = parseStringArray(req.body.grades) || [];
+    } else if (req.body?.varieties !== undefined) {
+      const rows = parseLegacyVarietyRows(req.body.varieties);
+      varietyValues = rows.map((r) => r.grade);
+      if (rows.length) varietyKeyword = rows[0].keyword;
+    }
 
     const item = await Product.create({
       subCategory: subCategoryId,
@@ -135,11 +219,15 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
       catelog,
       features,
       specifications,
-      grades,
+      applications,
+      varietyKeyword,
+      varietyValues,
+      varieties: [],
+      grades: [],
       sort: sort !== undefined ? String(sort).trim() : ''
     });
 
-    return res.status(201).json({ item });
+    return res.status(201).json({ item: serializeProduct(item) });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to create product' });
   }
@@ -173,7 +261,31 @@ router.put('/:id', adminAuth, productUpload, async (req, res) => {
     if (req.body?.active !== undefined) item.active = parseBool(req.body.active, item.active);
     if (req.body?.features !== undefined) item.features = parseStringArray(req.body.features) || [];
     if (req.body?.specifications !== undefined) item.specifications = parseStringArray(req.body.specifications) || [];
-    if (req.body?.grades !== undefined) item.grades = parseStringArray(req.body.grades) || [];
+    if (req.body?.applications !== undefined) item.applications = parseStringArray(req.body.applications) || [];
+
+    const touchesVariety =
+      req.body?.varietyKeyword !== undefined ||
+      req.body?.varietyValues !== undefined ||
+      req.body?.varieties !== undefined ||
+      req.body?.grades !== undefined;
+
+    if (touchesVariety) {
+      if (req.body?.varietyKeyword !== undefined) {
+        item.varietyKeyword =
+          String(req.body.varietyKeyword).trim() || DEFAULT_VARIETY_KEYWORD;
+      }
+      if (req.body?.varietyValues !== undefined) {
+        item.varietyValues = parseStringArray(req.body.varietyValues) || [];
+      } else if (req.body?.grades !== undefined) {
+        item.varietyValues = parseStringArray(req.body.grades) || [];
+      } else if (req.body?.varieties !== undefined) {
+        const rows = parseLegacyVarietyRows(req.body.varieties);
+        item.varietyValues = rows.map((r) => r.grade);
+        if (rows.length) item.varietyKeyword = rows[0].keyword;
+      }
+      item.varieties = [];
+      item.grades = [];
+    }
 
     const imageFile = firstUploadedFile(req, 'image');
     if (imageFile) {
@@ -190,7 +302,7 @@ router.put('/:id', adminAuth, productUpload, async (req, res) => {
     }
 
     await item.save();
-    return res.json({ item });
+    return res.json({ item: serializeProduct(item) });
   } catch (err) {
     return res.status(400).json({ message: 'Failed to update product' });
   }

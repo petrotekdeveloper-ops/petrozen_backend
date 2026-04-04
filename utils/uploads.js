@@ -200,6 +200,47 @@ function uploadFor(subdir) {
   });
 }
 
+function handleMulterUploadError(err, res) {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      res.status(400).json({ message: 'File too large. Maximum size is 5MB.' });
+      return true;
+    }
+    res.status(400).json({ message: `Upload error: ${err.message}` });
+    return true;
+  }
+
+  const providerErrorNames = new Set([
+    'InvalidAccessKeyId',
+    'SignatureDoesNotMatch',
+    'AccessDenied',
+    'NoSuchBucket',
+    'CredentialsProviderError'
+  ]);
+
+  const isProviderError = Boolean(
+    (err && err.$metadata) ||
+    (err && err.Code) ||
+    (err && providerErrorNames.has(err.name)) ||
+    (err && typeof err.message === 'string' && /(access key|signature|bucket|credentials|digitalocean|spaces)/i.test(err.message))
+  );
+
+  if (isProviderError) {
+    console.error('Spaces upload error:', err);
+    res.status(500).json({ message: 'Storage upload failed. Check DigitalOcean Spaces credentials and bucket settings.' });
+    return true;
+  }
+
+  if (err && typeof err.message === 'string') {
+    const isConfigIssue = err.message.startsWith('Missing required DigitalOcean Spaces env vars');
+    res.status(isConfigIssue ? 500 : 400).json({ message: err.message });
+    return true;
+  }
+
+  res.status(500).json({ message: 'Failed to upload file' });
+  return true;
+}
+
 function uploadSingleFor(subdir, fieldName = 'image') {
   const middleware = uploadFor(subdir).single(fieldName);
   return (req, res, next) => {
@@ -208,44 +249,20 @@ function uploadSingleFor(subdir, fieldName = 'image') {
         next();
         return;
       }
+      handleMulterUploadError(err, res);
+    });
+  };
+}
 
-      if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          res.status(400).json({ message: 'File too large. Maximum size is 5MB.' });
-          return;
-        }
-        res.status(400).json({ message: `Upload error: ${err.message}` });
+function uploadArrayFor(subdir, fieldName = 'images', maxCount = 15) {
+  const middleware = uploadFor(subdir).array(fieldName, maxCount);
+  return (req, res, next) => {
+    middleware(req, res, (err) => {
+      if (!err) {
+        next();
         return;
       }
-
-      const providerErrorNames = new Set([
-        'InvalidAccessKeyId',
-        'SignatureDoesNotMatch',
-        'AccessDenied',
-        'NoSuchBucket',
-        'CredentialsProviderError'
-      ]);
-
-      const isProviderError = Boolean(
-        (err && err.$metadata) ||
-        (err && err.Code) ||
-        (err && providerErrorNames.has(err.name)) ||
-        (err && typeof err.message === 'string' && /(access key|signature|bucket|credentials|digitalocean|spaces)/i.test(err.message))
-      );
-
-      if (isProviderError) {
-        console.error('Spaces upload error:', err);
-        res.status(500).json({ message: 'Storage upload failed. Check DigitalOcean Spaces credentials and bucket settings.' });
-        return;
-      }
-
-      if (err && typeof err.message === 'string') {
-        const isConfigIssue = err.message.startsWith('Missing required DigitalOcean Spaces env vars');
-        res.status(isConfigIssue ? 500 : 400).json({ message: err.message });
-        return;
-      }
-
-      res.status(500).json({ message: 'Failed to upload file' });
+      handleMulterUploadError(err, res);
     });
   };
 }
@@ -391,6 +408,7 @@ module.exports = {
   upload,
   uploadFor,
   uploadSingleFor,
+  uploadArrayFor,
   uploadFieldsFor,
   SUBDIRS
 };

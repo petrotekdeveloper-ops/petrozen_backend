@@ -27,7 +27,10 @@ const ProductSchema = new mongoose.Schema(
     },
     title: { type: String, required: true, trim: true },
     description: { type: String, default: '', trim: true },
+    /** First image URL; kept in sync with images[0] for legacy clients */
     imageUrl: { type: String, default: '' },
+    /** Gallery URLs (DigitalOcean Spaces or legacy paths) */
+    images: { type: [String], default: [] },
     features: { type: [String], default: [], trim: true },
     specifications: { type: [String], default: [], trim: true },
     applications: { type: [String], default: [], trim: true },
@@ -46,5 +49,22 @@ const ProductSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+/**
+ * Keeps imageUrl and images aligned for legacy documents that only had imageUrl,
+ * and ensures imageUrl is always the first gallery URL after any save.
+ */
+ProductSchema.pre('save', function productSyncImageFields() {
+  const imgs = Array.isArray(this.images) ? this.images.filter(Boolean) : [];
+  if (imgs.length > 0) {
+    this.images = imgs;
+    this.imageUrl = imgs[0] || '';
+  } else if (this.imageUrl) {
+    this.images = [this.imageUrl];
+  } else {
+    this.images = [];
+    this.imageUrl = '';
+  }
+});
 
 module.exports = mongoose.model('Product', ProductSchema);

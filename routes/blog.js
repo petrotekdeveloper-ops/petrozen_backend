@@ -1,9 +1,17 @@
 const express = require('express');
 const adminAuth = require('../middleware/adminAuth');
 const Blog = require('../models/blog');
-const { filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadSingleFor } = require('../utils/uploads');
+const { filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, uploadArrayFor } = require('../utils/uploads');
 
 const router = express.Router();
+
+const MAX_IMAGES = 15;
+
+function itemImageUrls(item) {
+  if (!item) return [];
+  const imgs = item.images;
+  return Array.isArray(imgs) ? imgs.filter(Boolean) : [];
+}
 
 // GET /api/blog – list all blogs (newest first)
 router.get('/', async (req, res) => {
@@ -26,20 +34,20 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/blog (admin) – multipart/form-data: title, description, image
-router.post('/', adminAuth, uploadSingleFor('blog'), async (req, res) => {
+// POST /api/blog (admin) – multipart: title, description, images? (0–15 files)
+router.post('/', adminAuth, uploadArrayFor('blog', 'images', MAX_IMAGES), async (req, res) => {
   try {
     const { title, description } = req.body || {};
     if (!title) return res.status(400).json({ message: 'title is required' });
     if (!description) return res.status(400).json({ message: 'description is required' });
-    if (!req.file) return res.status(400).json({ message: 'image is required' });
 
-    const imageUrl = uploadedFileUrl(req.file);
+    const files = Array.isArray(req.files) ? req.files : [];
+    const imageUrls = files.map((f) => uploadedFileUrl(f)).filter(Boolean);
 
     const item = await Blog.create({
       title,
       description,
-      image: imageUrl
+      images: imageUrls
     });
 
     return res.status(201).json({ item });
@@ -48,8 +56,8 @@ router.post('/', adminAuth, uploadSingleFor('blog'), async (req, res) => {
   }
 });
 
-// PUT /api/blog/:id (admin) – multipart/form-data: title?, description?, image?
-router.put('/:id', adminAuth, uploadSingleFor('blog'), async (req, res) => {
+// PUT /api/blog/:id (admin) – multipart: title?, description?, existingImages? (JSON array of URLs to keep), images? (new files)
+router.put('/:id', adminAuth, uploadArrayFor('blog', 'images', MAX_IMAGES), async (req, res) => {
   try {
     const item = await Blog.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'Blog not found' });
@@ -58,12 +66,40 @@ router.put('/:id', adminAuth, uploadSingleFor('blog'), async (req, res) => {
     if (title !== undefined) item.title = title;
     if (description !== undefined) item.description = description;
 
-    if (req.file) {
-      const oldPath = filePathFromPublicUrl(item.image);
-      item.image = uploadedFileUrl(req.file);
-      tryDeleteFile(oldPath);
+    const prevUrls = itemImageUrls(item);
+    const newFiles = Array.isArray(req.files) ? req.files : [];
+    const newUrls = newFiles.map((f) => uploadedFileUrl(f)).filter(Boolean);
+
+    let keepUrls = prevUrls;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'existingImages')) {
+      const raw = req.body.existingImages;
+      if (raw != null && raw !== '') {
+        try {
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (Array.isArray(parsed)) {
+            const allowed = new Set(prevUrls);
+            keepUrls = parsed.filter((u) => typeof u === 'string' && allowed.has(u));
+          }
+        } catch (_) {
+          keepUrls = prevUrls;
+        }
+      } else {
+        keepUrls = [];
+      }
     }
 
+    const nextUrls = [...keepUrls, ...newUrls];
+    if (nextUrls.length > MAX_IMAGES) {
+      for (const u of newUrls) tryDeleteFile(filePathFromPublicUrl(u));
+      return res.status(400).json({ message: `Maximum ${MAX_IMAGES} images per blog` });
+    }
+
+    const nextSet = new Set(nextUrls);
+    for (const url of prevUrls) {
+      if (!nextSet.has(url)) tryDeleteFile(filePathFromPublicUrl(url));
+    }
+
+    item.images = nextUrls;
     await item.save();
     return res.json({ item });
   } catch (err) {
@@ -77,8 +113,9 @@ router.delete('/:id', adminAuth, async (req, res) => {
     const item = await Blog.findById(req.params.id);
     if (!item) return res.status(404).json({ message: 'Blog not found' });
 
+    const urls = itemImageUrls(item);
     await Blog.deleteOne({ _id: item._id });
-    tryDeleteFile(filePathFromPublicUrl(item.image));
+    for (const url of urls) tryDeleteFile(filePathFromPublicUrl(url));
 
     return res.json({ message: 'Blog deleted' });
   } catch (err) {

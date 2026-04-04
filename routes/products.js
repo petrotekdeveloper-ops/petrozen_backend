@@ -9,6 +9,27 @@ const { parseBool, filePathFromPublicUrl, uploadedFileUrl, tryDeleteFile, upload
 const router = express.Router();
 
 const DEFAULT_VARIETY_KEYWORD = 'grade';
+const MAX_PRODUCT_IMAGES = 15;
+
+function productImageUrlsFromPlain(plain) {
+  if (!plain) return [];
+  const imgs = plain.images;
+  if (Array.isArray(imgs) && imgs.length > 0) return imgs.filter(Boolean);
+  if (plain.imageUrl) return [plain.imageUrl];
+  return [];
+}
+
+function productImageUrlsFromDoc(item) {
+  if (!item) return [];
+  const imgs = item.images;
+  if (Array.isArray(imgs) && imgs.length > 0) return imgs.filter(Boolean);
+  if (item.imageUrl) return [item.imageUrl];
+  return [];
+}
+
+function deleteUploadedList(urls) {
+  for (const url of urls) tryDeleteFile(filePathFromPublicUrl(url));
+}
 
 /** Legacy request body: [{ keyword, grade }, ...] */
 function parseLegacyVarietyRows(value) {
@@ -76,10 +97,14 @@ function serializeProduct(doc) {
   plain.varietyValues = v.varietyValues;
   delete plain.varieties;
   delete plain.grades;
+  const picUrls = productImageUrlsFromPlain(plain);
+  plain.images = picUrls;
+  plain.imageUrl = picUrls[0] || '';
   return plain;
 }
 const productUpload = uploadFieldsFor('products', [
   { name: 'image', maxCount: 1, allowImages: true, allowPdf: false },
+  { name: 'images', maxCount: MAX_PRODUCT_IMAGES, allowImages: true, allowPdf: false },
   { name: 'catelog', maxCount: 1, allowImages: true, allowPdf: true },
   { name: 'catelouge', maxCount: 1, allowImages: true, allowPdf: true }
 ]);
@@ -88,6 +113,11 @@ function firstUploadedFile(req, fieldName) {
   const files = req.files && req.files[fieldName];
   if (!Array.isArray(files) || files.length === 0) return null;
   return files[0];
+}
+
+function uploadedFilesList(req, fieldName) {
+  const files = req.files && req.files[fieldName];
+  return Array.isArray(files) ? files : [];
 }
 
 function parseStringArray(value) {
@@ -173,7 +203,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/products (admin) multipart/form-data: subCategoryId, brandId?, title, description?, active?, image?
+// POST /api/products (admin) multipart: …, image? (single, legacy), images? (0–15), catelog?
 router.post('/', adminAuth, productUpload, async (req, res) => {
   try {
     const { subCategoryId, brandId, title, description, sort } = req.body || {};
@@ -190,7 +220,14 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
     }
 
     const active = parseBool(req.body?.active, true);
-    const imageUrl = uploadedFileUrl(firstUploadedFile(req, 'image'));
+    const multiUrls = uploadedFilesList(req, 'images').map((f) => uploadedFileUrl(f)).filter(Boolean);
+    const legacyUrl = uploadedFileUrl(firstUploadedFile(req, 'image'));
+    let imageUrls = multiUrls.length > 0 ? multiUrls : legacyUrl ? [legacyUrl] : [];
+    if (imageUrls.length > MAX_PRODUCT_IMAGES) {
+      deleteUploadedList(imageUrls);
+      return res.status(400).json({ message: `Maximum ${MAX_PRODUCT_IMAGES} images per product` });
+    }
+    const imageUrl = imageUrls[0] || '';
     const catelog = uploadedFileUrl(firstUploadedFile(req, 'catelog') || firstUploadedFile(req, 'catelouge'));
     const features = parseStringArray(req.body?.features) || [];
     const specifications = parseStringArray(req.body?.specifications) || [];
@@ -216,6 +253,7 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
       description: description || '',
       active,
       imageUrl,
+      images: imageUrls,
       catelog,
       features,
       specifications,
@@ -233,7 +271,7 @@ router.post('/', adminAuth, productUpload, async (req, res) => {
   }
 });
 
-// PUT /api/products/:id (admin) multipart/form-data: subCategoryId?, brandId?, title?, description?, active?, image?
+// PUT /api/products/:id (admin) multipart: …, image? (legacy: replaces gallery with one), images? (append unless existingImages sent), existingImages? (JSON URLs to keep)
 router.put('/:id', adminAuth, productUpload, async (req, res) => {
   try {
     const item = await Product.findById(req.params.id);
@@ -287,11 +325,53 @@ router.put('/:id', adminAuth, productUpload, async (req, res) => {
       item.grades = [];
     }
 
-    const imageFile = firstUploadedFile(req, 'image');
-    if (imageFile) {
-      const oldPath = filePathFromPublicUrl(item.imageUrl);
-      item.imageUrl = uploadedFileUrl(imageFile);
-      tryDeleteFile(oldPath);
+    const prevPicUrls = productImageUrlsFromDoc(item);
+    const newMultiUrls = uploadedFilesList(req, 'images').map((f) => uploadedFileUrl(f)).filter(Boolean);
+    const legacyImageFile = firstUploadedFile(req, 'image');
+    const hasExistingImagesKey = Object.prototype.hasOwnProperty.call(req.body || {}, 'existingImages');
+
+    let nextPicUrls = prevPicUrls;
+
+    if (hasExistingImagesKey) {
+      let keepUrls = prevPicUrls;
+      const raw = req.body.existingImages;
+      if (raw != null && raw !== '') {
+        try {
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (Array.isArray(parsed)) {
+            const allowed = new Set(prevPicUrls);
+            keepUrls = parsed.filter((u) => typeof u === 'string' && allowed.has(u));
+          }
+        } catch (_) {
+          keepUrls = prevPicUrls;
+        }
+      } else {
+        keepUrls = [];
+      }
+      nextPicUrls = [...keepUrls, ...newMultiUrls];
+    } else if (legacyImageFile) {
+      const u = uploadedFileUrl(legacyImageFile);
+      nextPicUrls = u ? [u] : prevPicUrls;
+    } else if (newMultiUrls.length > 0) {
+      nextPicUrls = [...prevPicUrls, ...newMultiUrls];
+    }
+
+    if (nextPicUrls.length > MAX_PRODUCT_IMAGES) {
+      deleteUploadedList(newMultiUrls);
+      if (legacyImageFile) {
+        const u = uploadedFileUrl(legacyImageFile);
+        if (u) tryDeleteFile(filePathFromPublicUrl(u));
+      }
+      return res.status(400).json({ message: `Maximum ${MAX_PRODUCT_IMAGES} images per product` });
+    }
+
+    if (nextPicUrls !== prevPicUrls) {
+      const nextSet = new Set(nextPicUrls);
+      for (const url of prevPicUrls) {
+        if (!nextSet.has(url)) tryDeleteFile(filePathFromPublicUrl(url));
+      }
+      item.images = nextPicUrls;
+      item.imageUrl = nextPicUrls[0] || '';
     }
 
     const catelogFile = firstUploadedFile(req, 'catelog') || firstUploadedFile(req, 'catelouge');
@@ -321,7 +401,7 @@ router.delete('/:id', adminAuth, async (req, res) => {
       ]
     });
     await Product.deleteOne({ _id: item._id });
-    tryDeleteFile(filePathFromPublicUrl(item.imageUrl));
+    for (const url of productImageUrlsFromDoc(item)) tryDeleteFile(filePathFromPublicUrl(url));
     tryDeleteFile(filePathFromPublicUrl(item.catelog));
 
     return res.json({ message: 'Product deleted' });
